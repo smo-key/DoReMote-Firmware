@@ -4,8 +4,8 @@
 BLE                                 	    ble;
 Timeout                                   timeout;                
 
-const static char     DEVICE_NAME[]        = "Arthur's DoReMote";
-static const uint16_t uuid16_list[]        = {GattService::UUID_DEVICE_INFORMATION_SERVICE};
+static const char DEVICE_NAME[] = "Arthur's DoReMote";
+static const uint16_t uuid16_list[] = {GattService::UUID_DEVICE_INFORMATION_SERVICE};
 
 DeviceInformationService *deviceInfo;
 
