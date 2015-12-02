@@ -11,9 +11,8 @@ DeviceInformationService *deviceInfo;
 
 static void disconnectionCallBack(Gap::Handle_t handle, Gap::DisconnectionReason_t reason)
 {
-    Serial1.println("Disconnected!");
-    Serial1.println("Now advertising!");
     ble.startAdvertising();
+    Serial1.println("Disconnected. Advertising restarted!");
 }
 
 void setup() {
