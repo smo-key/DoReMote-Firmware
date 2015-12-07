@@ -5,7 +5,7 @@
 BLE ble;
 DeviceInformationService *deviceInfo;
 
-static const char DEVICE_NAME[] = "Arthur's DoReMote 2.0";
+static const char DEVICE_NAME[] = "Arthur's DoReMote";
 static const uint16_t uuid16_list[] = {GattService::UUID_DEVICE_INFORMATION_SERVICE};
 
 /* Pin setup */
@@ -57,8 +57,8 @@ void handle_pairButton()
 
     //If the device has already connected, disconnect, clear pairs and restart advertising
     //Tell the other host that we terminated the connection
-    ble.disconnect(Gap::LOCAL_HOST_TERMINATED_CONNECTION);
-    ble.purgeAllBondingState();
+    //ble.disconnect(Gap::LOCAL_HOST_TERMINATED_CONNECTION);
+    //ble.purgeAllBondingState();
 }
 
 void setup() {
@@ -79,7 +79,7 @@ void setup() {
     ticker_debugled.attach_us(task_debugled, 1000000);
 
     /* Set up interrupts that activate when input state changes */
-    //attachInterrupt(BTN_PAIR, handle_pairButton, FALLING); //RISING, FALLING, OR CHANGE
+    attachInterrupt(BTN_PAIR, handle_pairButton, CHANGE); //RISING, FALLING, OR CHANGE
 
     /* Initialize BLE device */
     //Initialize lower-level API.
