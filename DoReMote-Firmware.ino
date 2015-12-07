@@ -20,8 +20,8 @@ static const int BTN_PAIR = D4;
 static const int POTENTIOMETER = A5;
 
 /* Instantiate sub-process tasks */
-//Ticker ticker_pinrefresh;
 Ticker ticker_debugled;
+Ticker ticker_pinupdate;
 
 /* Instance variables */
 static boolean connected = false; //true if device conneted, false otherwise
@@ -41,11 +41,21 @@ void connectionCallback(const Gap::ConnectionCallbackParams_t *params)
 }
 
 void task_debugled()
-{
-    //Do debug things
+{    
     debugled = !debugled;
     digitalWrite(LED_INTERNAL, debugled);
     return;
+}
+
+void task_pinupdate() {
+    /* Update potentiometer volume value */
+    Serial1.print("Potentiometer (raw): ");
+    int potentiometer_raw = analogRead(POTENTIOMETER);
+    Serial1.print(potentiometer_raw);
+    Serial1.print(" Volume: ");
+    double volume = ((double)potentiometer_raw - 5.0)/1015.0;
+    volume = min(1.0, max(0.0, volume));
+    Serial1.println(volume);
 }
 
 void handle_pairButton()
@@ -53,12 +63,12 @@ void handle_pairButton()
     Serial1.println("Hit pair button handle!");
     
     //If the device has not connected, continue
-    if (!connected) { return; }
+    //if (!connected) { return; }
 
     //If the device has already connected, disconnect, clear pairs and restart advertising
     //Tell the other host that we terminated the connection
-    //ble.disconnect(Gap::LOCAL_HOST_TERMINATED_CONNECTION);
-    //ble.purgeAllBondingState();
+    ble.disconnect(Gap::LOCAL_HOST_TERMINATED_CONNECTION);
+    ble.purgeAllBondingState();
 }
 
 void setup() {
@@ -66,7 +76,7 @@ void setup() {
     Serial1.begin(9600);
 
     /* Set up pins */
-    //pinMode(BTN_PLAY, INPUT);
+    pinMode(BTN_PLAY, INPUT);
     //pinMode(BTN_PREV, INPUT);
     //pinMode(BTN_NEXT, INPUT);
     pinMode(BTN_PAIR, INPUT);
@@ -77,9 +87,10 @@ void setup() {
   
     /* Set up sub-tasks that run every time frame - times in microseconds (1000000 us = 1 s) */
     ticker_debugled.attach_us(task_debugled, 1000000);
+    ticker_pinupdate.attach_us(task_pinupdate, 100000);
 
     /* Set up interrupts that activate when input state changes */
-    attachInterrupt(BTN_PAIR, handle_pairButton, CHANGE); //RISING, FALLING, OR CHANGE
+    attachInterrupt(BTN_PAIR, handle_pairButton, RISING); //RISING, FALLING, OR CHANGE
 
     /* Initialize BLE device */
     //Initialize lower-level API.
@@ -110,7 +121,7 @@ void setup() {
    
     /* Begin advertising */
     //Set transmit power, valid values are -40, -20, -16, -12, -8, -4, 0, 4.
-    ble.setTxPower(0);
+    ble.setTxPower(4);
     //Set advertising frequency in milliseconds.
     ble.gap().setAdvertisingInterval(1000);
     //Set advertising timeout in milliseconds. 0 is never.
