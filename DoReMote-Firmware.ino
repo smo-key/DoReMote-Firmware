@@ -19,14 +19,14 @@ uint8_t tx_value[TXRX_BUF_LEN] = {0,};
 uint8_t rx_value[TXRX_BUF_LEN] = {0,};
 
 /* Pin setup */
-static const int LED_INTERNAL = D13;
-static const int LED_R = D3;
-static const int LED_G = D0;
-static const int LED_B = D1;
-static const int BTN_PLAY = D7;
-static const int BTN_PREV = D6;
-static const int BTN_NEXT = D5;
-static const int BTN_PAIR = D4;
+static const int LED_INTERNAL = 13;
+static const int LED_R = 3;
+static const int LED_G = 0;
+static const int LED_B = 1;
+static const int BTN_PLAY = 7;
+static const int BTN_PREV = 6;
+static const int BTN_NEXT = 5;
+static const int BTN_PAIR = 4;
 static const int POTENTIOMETER = A5;
 
 /* Instantiate sub-process tasks */
@@ -35,7 +35,7 @@ Ticker ticker_pinupdate;
 
 /* Instance variables */
 static boolean connected = false; //true if device conneted, false otherwise
-static boolean debugled = false; //state of debug led
+static boolean debugled = LOW; //state of debug led
 static double volume = 0.0; //current volume, from 0 to 1
 
 void disconnectionCallback(Gap::Handle_t handle, Gap::DisconnectionReason_t reason)
@@ -52,22 +52,26 @@ void connectionCallback(const Gap::ConnectionCallbackParams_t *params)
 }
 
 void task_debugled()
-{    
+{   
     debugled = !debugled;
     digitalWrite(LED_INTERNAL, debugled);
-    return;
 }
 
 void task_pinupdate() {
     /* Update potentiometer volume value */
-    //Serial.print("Potentiometer (raw): ");
+    Serial.print("Potentiometer (raw): ");
     int potentiometer_raw = analogRead(POTENTIOMETER);
-    //Serial.print(potentiometer_raw);
-    //Serial.print(" Volume: ");
+    Serial.print(potentiometer_raw);
+    Serial.print(" Volume: ");
     double v = ((double)potentiometer_raw - 5.0)/1015.0;
-    v = min(1.0, max(0.0, v));
+    v = 1.0 - min(1.0, max(0.0, v));
     volume = v;
-    //Serial.println(volume);
+    Serial.print(volume);
+
+    Serial.print(" Pair: ");
+    Serial.print(digitalRead(BTN_PAIR));
+    Serial.print(" Play: ");
+    Serial.println(digitalRead(BTN_PLAY));
 }
 
 void handle_pairButton()
@@ -134,10 +138,10 @@ void setup() {
     Serial.begin(9600);
 
     /* Set up pins */
-    pinMode(BTN_PLAY, INPUT);
+    //pinMode(BTN_PLAY, INPUT);
     //pinMode(BTN_PREV, INPUT);
     //pinMode(BTN_NEXT, INPUT);
-    pinMode(BTN_PAIR, INPUT);
+    //pinMode(BTN_PAIR, INPUT);
     //pinMode(LED_R, OUTPUT);
     //pinMode(LED_G, OUTPUT);
     //pinMode(LED_B, OUTPUT);
@@ -148,7 +152,8 @@ void setup() {
     ticker_pinupdate.attach_us(task_pinupdate, 100000);
 
     /* Set up interrupts that activate when input state changes */
-    attachInterrupt(BTN_PAIR, handle_pairButton, RISING); //RISING, FALLING, OR CHANGE
+    //attachInterrupt(BTN_PAIR, handle_pairButton, RISING); //RISING, FALLING, OR CHANGE
+    //attachInterrupt(BTN_PLAY, handle_pairButton, RISING);
 
     /* Initialize BLE device */
     //Initialize lower-level API.
