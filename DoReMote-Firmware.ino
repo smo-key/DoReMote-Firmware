@@ -1,33 +1,22 @@
 #include "ble/BLE.h"
 #include "ble/services/DeviceInformationService.h"
-#define TXRX_BUF_LEN                      20
+#include "ble/services/UARTService.h"
 
 /* Bluetooth Low Energy API Setup */
 BLE ble;  
+UARTService *uartService;
 DeviceInformationService *deviceInfo;
 
 static const char DEVICE_NAME[] = "Arthur's DoReMote";
-static const uint16_t uuid16_list[] = {GattService::UUID_DEVICE_INFORMATION_SERVICE};
 
 /* UART Communication setup */
-Timeout timeout; 
+#define TXRX_BUF_LEN 20
+Timeout timeout;
 static uint8_t rx_buf[TXRX_BUF_LEN];
 static uint8_t rx_buf_num;
 static uint8_t rx_state=0;
-
-// The Nordic UART Service
-static const uint8_t service1_uuid[]                = {0x71, 0x3D, 0, 0, 0x50, 0x3E, 0x4C, 0x75, 0xBA, 0x94, 0x31, 0x48, 0xF1, 0x8D, 0x94, 0x1E};
-static const uint8_t service1_tx_uuid[]             = {0x71, 0x3D, 0, 3, 0x50, 0x3E, 0x4C, 0x75, 0xBA, 0x94, 0x31, 0x48, 0xF1, 0x8D, 0x94, 0x1E};
-static const uint8_t service1_rx_uuid[]             = {0x71, 0x3D, 0, 2, 0x50, 0x3E, 0x4C, 0x75, 0xBA, 0x94, 0x31, 0x48, 0xF1, 0x8D, 0x94, 0x1E};
-static const uint8_t uart_base_uuid_rev[]           = {0x1E, 0x94, 0x8D, 0xF1, 0x48, 0x31, 0x94, 0xBA, 0x75, 0x4C, 0x3E, 0x50, 0, 0, 0x3D, 0x71};
-
 uint8_t tx_value[TXRX_BUF_LEN] = {0,};
 uint8_t rx_value[TXRX_BUF_LEN] = {0,};
-
-GattCharacteristic  characteristic1(service1_tx_uuid, tx_value, 1, TXRX_BUF_LEN, GattCharacteristic::BLE_GATT_CHAR_PROPERTIES_WRITE | GattCharacteristic::BLE_GATT_CHAR_PROPERTIES_WRITE_WITHOUT_RESPONSE );
-GattCharacteristic  characteristic2(service1_rx_uuid, rx_value, 1, TXRX_BUF_LEN, GattCharacteristic::BLE_GATT_CHAR_PROPERTIES_NOTIFY);
-GattCharacteristic *uartChars[] = {&characteristic1, &characteristic2};
-GattService         uartService(service1_uuid, uartChars, sizeof(uartChars) / sizeof(GattCharacteristic *));
 
 /* Pin setup */
 static const int LED_INTERNAL = D13;
@@ -51,14 +40,14 @@ static double volume = 0.0; //current volume, from 0 to 1
 
 void disconnectionCallback(Gap::Handle_t handle, Gap::DisconnectionReason_t reason)
 {  
-    Serial1.println("Disconnected. Advertising restarted!");
+    Serial.println("Disconnected. Advertising restarted!");
     connected = false;
     ble.startAdvertising();
 }
 
 void connectionCallback(const Gap::ConnectionCallbackParams_t *params)
 {  
-    Serial1.println("Connected!");
+    Serial.println("Connected!");
     connected = true;
 }
 
@@ -71,19 +60,19 @@ void task_debugled()
 
 void task_pinupdate() {
     /* Update potentiometer volume value */
-    //Serial1.print("Potentiometer (raw): ");
+    //Serial.print("Potentiometer (raw): ");
     int potentiometer_raw = analogRead(POTENTIOMETER);
-    //Serial1.print(potentiometer_raw);
-    //Serial1.print(" Volume: ");
+    //Serial.print(potentiometer_raw);
+    //Serial.print(" Volume: ");
     double v = ((double)potentiometer_raw - 5.0)/1015.0;
     v = min(1.0, max(0.0, v));
     volume = v;
-    //Serial1.println(volume);
+    //Serial.println(volume);
 }
 
 void handle_pairButton()
 {
-    Serial1.println("Hit pair button handle!");
+    Serial.println("Hit pair button handle!");
     
     //If the device has not connected, continue
     //if (!connected) { return; }
@@ -102,42 +91,38 @@ void writtenHandle(const GattWriteCallbackParams *Handler)
     uint8_t buf[TXRX_BUF_LEN];
     uint16_t bytesRead, index;
 
-    Serial1.println("onDataWritten : ");
-    if (Handler->handle == characteristic1.getValueAttribute().getHandle()) {
-        ble.readCharacteristicValue(characteristic1.getValueAttribute().getHandle(), buf, &bytesRead);
-        Serial1.print("bytesRead: ");
-        Serial1.println(bytesRead, HEX);
+    if (Handler->handle == uartService->getTXCharacteristicHandle()) {
+        ble.readCharacteristicValue(uartService->getTXCharacteristicHandle(), buf, &bytesRead);
         for(byte index=0; index<bytesRead; index++) {
-            Serial1.write(buf[index]);
+            Serial.write(buf[index]);
         }
-        Serial1.println("");
     }
 }
 
 void m_uart_rx_handle()
 {   //update characteristic data
-    ble.updateCharacteristicValue(characteristic2.getValueAttribute().getHandle(), rx_buf, rx_buf_num);   
+    ble.updateCharacteristicValue(uartService->getRXCharacteristicHandle(), rx_buf, rx_buf_num);
     memset(rx_buf, 0x00,20);
     rx_state = 0;
 }
 
 void uart_handle(uint32_t id, SerialIrq event)
-{   /* Serial1 rx IRQ */
-    if(event == RxIrq) {   
-        if (rx_state == 0) {  
+{   /* Serial rx IRQ */
+    if(event == RxIrq) {
+        if (rx_state == 0) {
             rx_state = 1;
             timeout.attach_us(m_uart_rx_handle, 100000);
             rx_buf_num=0;
         }
-        while(Serial1.available()) {
+        while(Serial.available()) {
             if(rx_buf_num < 20) {
-                rx_buf[rx_buf_num] = Serial1.read();
+                rx_buf[rx_buf_num] = Serial.read();
                 rx_buf_num++;
             }
             else {
-                Serial1.read();
+                Serial.read();
             }
-        }   
+        }
     }
 }
 
@@ -146,8 +131,7 @@ void uart_handle(uint32_t id, SerialIrq event)
  */
 void setup() {
     /* Instantiate debug port */
-    Serial1.begin(9600);
-    Serial1.attach(uart_handle);
+    Serial.begin(9600);
 
     /* Set up pins */
     pinMode(BTN_PLAY, INPUT);
@@ -157,7 +141,7 @@ void setup() {
     //pinMode(LED_R, OUTPUT);
     //pinMode(LED_G, OUTPUT);
     //pinMode(LED_B, OUTPUT);
-    //pinMode(LED_INTERNAL, OUTPUT);
+    pinMode(LED_INTERNAL, OUTPUT);
   
     /* Set up sub-tasks that run every time frame - times in microseconds (1000000 us = 1 s) */
     ticker_debugled.attach_us(task_debugled, 1000000);
@@ -171,11 +155,7 @@ void setup() {
     ble.init();
     //Allow connections. Passcode can also be specified here.
     ble.initializeSecurity();
-
-    /* Setup services */
-    //Tell devices what this is.
-    deviceInfo = new DeviceInformationService(ble, "ARM", "Model1", "SN1", "hw-rev1", "fw-rev1", "soft-rev1");
-
+    
     /* Setup callbacks */
     ble.gap().onDisconnection(disconnectionCallback);
     ble.gap().onConnection(connectionCallback);
@@ -191,8 +171,15 @@ void setup() {
     //Give device a name to broadcast.
     ble.gap().accumulateAdvertisingPayload(GapAdvertisingData::COMPLETE_LOCAL_NAME, (uint8_t *)DEVICE_NAME, sizeof(DEVICE_NAME));
     //Add services list
-    ble.gap().accumulateAdvertisingPayload(GapAdvertisingData::COMPLETE_LIST_16BIT_SERVICE_IDS, (uint8_t *)uuid16_list, sizeof(uuid16_list));
-   
+    ble.gap().accumulateAdvertisingPayload(GapAdvertisingData::COMPLETE_LIST_128BIT_SERVICE_IDS,
+                                    (const uint8_t *)UARTServiceUUID, sizeof(UARTServiceUUID));
+
+    /* Setup services */
+    //Tell devices what this is.
+    deviceInfo = new DeviceInformationService(ble, "ARM", "Model1", "SN1", "hw-rev1", "fw-rev1", "soft-rev1");
+    uartService = new UARTService(ble);
+    Serial.attach(uart_handle);
+    
     /* Begin advertising */
     //Set transmit power, valid values are -40, -20, -16, -12, -8, -4, 0, 4.
     ble.setTxPower(4);
@@ -203,7 +190,7 @@ void setup() {
     //Actually begin advertising
     ble.gap().startAdvertising();
 
-    Serial1.println("Now advertising!");
+    Serial.println("Now advertising!");
 }
 
 void loop() {
