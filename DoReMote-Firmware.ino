@@ -11,6 +11,7 @@ static const char DEVICE_NAME[] = "Arthur's DoReMote";
 
 /* UART Communication setup */
 #define TXRX_BUF_LEN 20
+#define CONVERT_BUF_LEN 8
 Timeout timeout;
 static uint8_t rx_buf[TXRX_BUF_LEN];
 static uint8_t rx_buf_num;
@@ -35,8 +36,101 @@ Ticker ticker_pinupdate;
 
 /* Instance variables */
 static boolean connected = false; //true if device conneted, false otherwise
+static boolean justconnected = false; //true if device conneted since last update, false otherwise
 static boolean debugled = LOW; //state of debug led
-static double volume = 0.0; //current volume, from 0 to 1
+static int volume = 0; //current volume, from 0 to 100
+
+void sendString(const char *str)
+{
+    uartService->writeString(str);
+}
+void sendLine(const char *str)
+{
+    uartService->writeString(str);
+    uartService->writeString("\n");
+}
+char _int2str[7];
+char* int2str( register int i ) {
+  register unsigned char L = 1;
+  register char c;
+  register boolean m = false;
+  register char b;  // lower-byte of i
+  // negative
+  if ( i < 0 ) {
+    _int2str[ 0 ] = '-';
+    i = -i;
+  }
+  else L = 0;
+  // ten-thousands
+  if( i > 9999 ) {
+    c = i < 20000 ? 1
+      : i < 30000 ? 2
+      : 3;
+    _int2str[ L++ ] = c + 48;
+    i -= c * 10000;
+    m = true;
+  }
+  // thousands
+  if( i > 999 ) {
+    c = i < 5000
+      ? ( i < 3000
+          ? ( i < 2000 ? 1 : 2 )
+          :   i < 4000 ? 3 : 4
+        )
+      : i < 8000
+        ? ( i < 6000
+            ? 5
+            : i < 7000 ? 6 : 7
+          )
+        : i < 9000 ? 8 : 9;
+    _int2str[ L++ ] = c + 48;
+    i -= c * 1000;
+    m = true;
+  }
+  else if( m ) _int2str[ L++ ] = '0';
+  // hundreds
+  if( i > 99 ) {
+    c = i < 500
+      ? ( i < 300
+          ? ( i < 200 ? 1 : 2 )
+          :   i < 400 ? 3 : 4
+        )
+      : i < 800
+        ? ( i < 600
+            ? 5
+            : i < 700 ? 6 : 7
+          )
+        : i < 900 ? 8 : 9;
+    _int2str[ L++ ] = c + 48;
+    i -= c * 100;
+    m = true;
+  }
+  else if( m ) _int2str[ L++ ] = '0';
+  // decades (check on lower byte to optimize code)
+  b = char( i );
+  if( b > 9 ) {
+    c = b < 50
+      ? ( b < 30
+          ? ( b < 20 ? 1 : 2 )
+          :   b < 40 ? 3 : 4
+        )
+      : b < 80
+        ? ( i < 60
+            ? 5
+            : i < 70 ? 6 : 7
+          )
+        : i < 90 ? 8 : 9;
+    _int2str[ L++ ] = c + 48;
+    b -= c * 10;
+    m = true;
+  }
+  else if( m ) _int2str[ L++ ] = '0';
+  // last digit
+  _int2str[ L++ ] = b + 48;
+  // null terminator
+  _int2str[ L ] = 0;  
+  return _int2str;
+}  
 
 void disconnectionCallback(Gap::Handle_t handle, Gap::DisconnectionReason_t reason)
 {  
@@ -49,6 +143,9 @@ void connectionCallback(const Gap::ConnectionCallbackParams_t *params)
 {  
     Serial.println("Connected!");
     connected = true;
+    delay(500);
+    justconnected = true;
+    task_pinupdate();
 }
 
 void task_debugled()
@@ -59,32 +156,49 @@ void task_debugled()
 
 void task_pinupdate() {
     /* Update potentiometer volume value */
-    Serial.print("Potentiometer (raw): ");
+    //Serial.print("Potentiometer (raw): ");
     int potentiometer_raw = analogRead(POTENTIOMETER);
-    Serial.print(potentiometer_raw);
-    Serial.print(" Volume: ");
-    double v = ((double)potentiometer_raw - 5.0)/1015.0;
+    //Serial.print(potentiometer_raw);
+    //Serial.print(" Volume: ");
+    double v = ((double)potentiometer_raw - 10.0)/1014.0;
     v = 1.0 - min(1.0, max(0.0, v));
-    volume = v;
-    Serial.print(volume);
-
-    Serial.print(" Pair: ");
-    Serial.print(digitalRead(BTN_PAIR));
-    Serial.print(" Play: ");
-    Serial.println(digitalRead(BTN_PLAY));
+    int vcur = (int)(v * 100); //current volume
+    if (vcur != volume || justconnected)
+    {
+      sendString("!v ");
+      sendLine(int2str(vcur));
+    }
+    volume = vcur;
+    justconnected = false;
+    //Serial.print(volume);   
 }
 
 void handle_pairButton()
 {
     Serial.println("Hit pair button handle!");
-    
-    //If the device has not connected, continue
-    //if (!connected) { return; }
 
     //If the device has already connected, disconnect, clear pairs and restart advertising
     //Tell the other host that we terminated the connection
     ble.disconnect(Gap::LOCAL_HOST_TERMINATED_CONNECTION);
-    ble.purgeAllBondingState();
+    //ble.purgeAllBondingState();
+}
+
+void handle_playButton()
+{
+    Serial.println("Hit play/pause button handle!");
+    sendLine("!p");
+}
+
+void handle_prevButton()
+{
+    Serial.println("Hit previous button handle!");
+    sendLine("!<");
+}
+
+void handle_nextButton()
+{
+    Serial.println("Hit next button handle!");
+    sendLine("!>");
 }
 
 /** 
@@ -136,12 +250,13 @@ void uart_handle(uint32_t id, SerialIrq event)
 void setup() {
     /* Instantiate debug port */
     Serial.begin(9600);
+    Serial.attach(uart_handle);
 
     /* Set up pins */
-    //pinMode(BTN_PLAY, INPUT);
-    //pinMode(BTN_PREV, INPUT);
-    //pinMode(BTN_NEXT, INPUT);
-    //pinMode(BTN_PAIR, INPUT);
+    pinMode(BTN_PLAY, INPUT);
+    pinMode(BTN_PREV, INPUT);
+    pinMode(BTN_NEXT, INPUT);
+    pinMode(BTN_PAIR, INPUT);
     //pinMode(LED_R, OUTPUT);
     //pinMode(LED_G, OUTPUT);
     //pinMode(LED_B, OUTPUT);
@@ -152,8 +267,10 @@ void setup() {
     ticker_pinupdate.attach_us(task_pinupdate, 100000);
 
     /* Set up interrupts that activate when input state changes */
-    //attachInterrupt(BTN_PAIR, handle_pairButton, RISING); //RISING, FALLING, OR CHANGE
-    //attachInterrupt(BTN_PLAY, handle_pairButton, RISING);
+    attachInterrupt(BTN_PAIR, handle_pairButton, RISING); //RISING, FALLING, OR CHANGE
+    attachInterrupt(BTN_PLAY, handle_playButton, RISING);
+    attachInterrupt(BTN_PREV, handle_prevButton, RISING);
+    attachInterrupt(BTN_NEXT, handle_nextButton, RISING);
 
     /* Initialize BLE device */
     //Initialize lower-level API.
@@ -183,7 +300,6 @@ void setup() {
     //Tell devices what this is.
     deviceInfo = new DeviceInformationService(ble, "ARM", "Model1", "SN1", "hw-rev1", "fw-rev1", "soft-rev1");
     uartService = new UARTService(ble);
-    Serial.attach(uart_handle);
     
     /* Begin advertising */
     //Set transmit power, valid values are -40, -20, -16, -12, -8, -4, 0, 4.
