@@ -21,9 +21,9 @@ uint8_t rx_value[TXRX_BUF_LEN] = {0,};
 
 /* Pin setup */
 static const int LED_INTERNAL = 13;
-static const int LED_R = 3;
-static const int LED_G = 0;
-static const int LED_B = 1;
+static const int LED_R = 2;
+static const int LED_G = 3;
+static const int LED_B = A3;
 static const int BTN_PLAY = 7;
 static const int BTN_PREV = 6;
 static const int BTN_NEXT = 5;
@@ -38,6 +38,8 @@ Ticker ticker_pinupdate;
 static boolean connected = false; //true if device conneted, false otherwise
 static boolean justconnected = false; //true if device conneted since last update, false otherwise
 static boolean debugled = LOW; //state of debug led
+static boolean colorlocked = false; //true if the led color is currently locked by a thread
+static boolean shouldblink = false; //blink timer - flops every 2.5 s for an LED that should illuminate every 5 s
 static int volume = 0; //current volume, from 0 to 100
 
 void sendString(const char *str)
@@ -132,11 +134,49 @@ char* int2str( register int i ) {
   return _int2str;
 }  
 
+void safeAnalogWrite(int pin, int value)
+{
+  analogWrite(pin, min(max(value, 0), 255));
+}
+void shutoffLED()
+{
+  analogWrite(LED_R, 255);
+  analogWrite(LED_G, 255);
+  analogWrite(LED_B, 255);
+}
+
 void disconnectionCallback(Gap::Handle_t handle, Gap::DisconnectionReason_t reason)
 {  
     Serial.println("Disconnected. Advertising restarted!");
     connected = false;
     ble.startAdvertising();
+
+    //wait for color to unlock
+    while (colorlocked && !connected)
+      delay(50);
+
+    //fade from red to black
+    colorlocked = true;
+   
+    analogWrite(LED_R, 0);
+    analogWrite(LED_G, 255);
+    analogWrite(LED_B, 255);
+    if (!connected)
+      delay(2000);
+
+    int i = 0;
+    while (!connected && i <= 256)
+    {
+      safeAnalogWrite(LED_R, i);
+      analogWrite(LED_G, 255);
+      analogWrite(LED_B, 255);
+      delay(20);
+      i+= 8;
+    }
+    shutoffLED();
+
+    //unlock the LED so that another thread can write to it
+    colorlocked = false;
 }
 
 void connectionCallback(const Gap::ConnectionCallbackParams_t *params)
@@ -146,12 +186,77 @@ void connectionCallback(const Gap::ConnectionCallbackParams_t *params)
     delay(500);
     justconnected = true;
     task_pinupdate();
+
+    //fade to green
+    colorlocked = true;
+    int i = 0;
+    shutoffLED();
+    while (connected && i <= 256)
+    {
+      analogWrite(LED_R, 255);
+      safeAnalogWrite(LED_G, 255 - i);
+      analogWrite(LED_B, 255);
+      delay(20);
+      i+= 8;
+    }
+
+    //wait 2 seconds
+    colorlocked = false;
+    if (connected)
+      delay(2000);
+
+    i = 0;
+    colorlocked = true;
+    //fade back to black
+    while (connected && i <= 256)
+    {
+      analogWrite(LED_R, 255);
+      safeAnalogWrite(LED_G, i);
+      analogWrite(LED_B, 255);
+      delay(20);
+      i+= 8;
+    }
+    shutoffLED();
+
+    //unlock the LED so that another thread can write to it - and start blinking connected LED
+    shouldblink = true;
+    colorlocked = false;
 }
 
 void task_debugled()
 {   
     debugled = !debugled;
     digitalWrite(LED_INTERNAL, debugled);
+
+    //fade in and out between blue if connected - orange if not connected and advertising
+    //also, only blink the connected LED every 2 times - so alternate shouldblink
+    if (connected)
+      shouldblink = !shouldblink;
+    if (connected && !shouldblink)
+      return;
+    if (colorlocked)
+      return;
+
+    shutoffLED();
+    int i = 0;
+    while (!colorlocked && i <= 255)
+    {
+      safeAnalogWrite(LED_R, connected ? 255 : 255 - i);
+      safeAnalogWrite(LED_G, connected ? 255 : 255 - i/2);
+      safeAnalogWrite(LED_B, connected ? 255 - i : 255);
+      delay(10);
+      i+= 4;
+    }
+    i = 0;
+    while (!colorlocked && i < 255)
+    {
+      safeAnalogWrite(LED_R, connected ? 255 : i);
+      safeAnalogWrite(LED_G, connected ? 255 : 127 + i/2);
+      safeAnalogWrite(LED_B, connected ? i : 255);
+      delay(10);
+      i+= 4;
+    }
+    shutoffLED();
 }
 
 void task_pinupdate() {
@@ -257,13 +362,16 @@ void setup() {
     pinMode(BTN_PREV, INPUT);
     pinMode(BTN_NEXT, INPUT);
     pinMode(BTN_PAIR, INPUT);
-    //pinMode(LED_R, OUTPUT);
-    //pinMode(LED_G, OUTPUT);
-    //pinMode(LED_B, OUTPUT);
+    pinMode(LED_R, OUTPUT);
+    pinMode(LED_G, OUTPUT);
+    pinMode(LED_B, OUTPUT);
     pinMode(LED_INTERNAL, OUTPUT);
+
+    /* RGB LED is common cathode (+) so HIGH = OFF */
+    shutoffLED();
   
     /* Set up sub-tasks that run every time frame - times in microseconds (1000000 us = 1 s) */
-    ticker_debugled.attach_us(task_debugled, 1000000);
+    ticker_debugled.attach_us(task_debugled, 2500000);
     ticker_pinupdate.attach_us(task_pinupdate, 100000);
 
     /* Set up interrupts that activate when input state changes */
